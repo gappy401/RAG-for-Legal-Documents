@@ -1,0 +1,17 @@
+[project]
+name = "rag-for-legal-documents"
+version = "0.1.0"
+description = "Hybrid retrieval RAG system for legal contract Q&A"
+authors = [
+    {name = "gappy401",email = "nanditaghildyal@gmail.com"}
+]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
