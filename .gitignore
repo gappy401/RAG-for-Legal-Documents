@@ -1,0 +1,14 @@
+# ---- Data ----
+data/
+!data/README.md
+
+# ---- Environment variables / secrets ----
+.env
+.env.*
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+*_executed.ipynb
+
+# ---- Virtual environment ----
+.venv/
