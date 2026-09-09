@@ -1,0 +1,103 @@
+[
+  {
+    "id": "limeenergy-001",
+    "contract_file": "LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT",
+    "natural_question": "What state's law governs this distributor agreement?",
+    "clause_category": "Governing Law",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement is to be construed according to the laws          of the State of Illinois.",
+      "answer_start": 52061
+    }
+  },
+  {
+    "id": "limeenergy-002",
+    "contract_file": "LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT",
+    "natural_question": "How long does this agreement run for before it needs renewing?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The term of this  Agreement  shall be ten (10)                            years (the \"Term\")  which shall  commence on the date                            upon which the Company  delivers to  Distributor  the                            last Sample, as defined  hereinafter.",
+      "answer_start": 5268
+    }
+  },
+  {
+    "id": "limeenergy-003",
+    "contract_file": "LIMEENERGYCO_09_09_1999-EX-10-DISTRIBUTOR AGREEMENT",
+    "natural_question": "Is there a minimum notice period required to terminate the renewal?",
+    "clause_category": "Notice Period To Terminate Renewal",
+    "expected_answer": "not_present",
+    "gold_answer_span": null
+  },
+  {
+    "id": "loha-supply-001",
+    "contract_file": "LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement",
+    "natural_question": "Does the seller have to carry insurance on the goods being shipped?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "To be covered by the Seller for 110% invoice value against All Risks and War Risk.",
+      "answer_start": 3659
+    }
+  },
+  {
+    "id": "loha-supply-002",
+    "contract_file": "LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement",
+    "natural_question": "What can the buyer do if the goods arrive defective or don't match the contract spec?",
+    "clause_category": "Warranty Duration",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Within 7 days after the arrival of the goods at destination, should the quality, specification, or quantity be found not in conformity with the stipulations of the Contract except those claims for which the insurance company or the owners of the vessel are liable, the Buyers, on the strength of the Inspection Certificate issued by the China Commodity Inspection Bureau, have the right to claim for replacement with new goods, or for compensation, and all the expenses (such as inspection charges, freight for returning the goods and for sending the replacement, insurance premium, storage and loading and unloading charges etc.) shall be borne by the Sellers.",
+      "answer_start": 6665
+    }
+  },
+  {
+    "id": "loha-supply-003",
+    "contract_file": "LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement",
+    "natural_question": "Is there a non-compete clause restricting either party?",
+    "clause_category": "Non-Compete",
+    "expected_answer": "not_present",
+    "gold_answer_span": null
+  },
+  {
+    "id": "metlife-remarketing-001",
+    "contract_file": "MetLife, Inc. - Remarketing Agreement",
+    "natural_question": "Is there a cap on how much the remarketing agent can be liable for?",
+    "clause_category": "Cap On Liability",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Notwithstanding the provisions of this subsection (d), no Remarketing Agent shall be required to contribute any amount in excess of the amount by which the total price at which the applicable Securities remarketed by it and distributed to the public were offered to the public exceeds the amount of any damages which such Remarketing Agent has otherwise been required to pay by reason of such untrue or alleged untrue statement or omission or alleged omission.",
+      "answer_start": 83497
+    }
+  },
+  {
+    "id": "metlife-remarketing-002",
+    "contract_file": "MetLife, Inc. - Remarketing Agreement",
+    "natural_question": "Which state's law applies to this remarketing agreement?",
+    "clause_category": "Governing Law",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "THIS REMARKETING AGREEMENT AND THE PRICING AGREEMENT SHALL BE GOVERNED BY AND CONSTRUED IN ACCORDANCE WITH THE LAWS OF THE STATE OF NEW YORK, WITHOUT REGARD TO PRINCIPLES OF CONFLICTS OF LAW TO THE EXTENT THAT SUCH PRINCIPLES WOULD REQUIRE OR PERMIT THE APPLICATION OF LAWS OF ANOTHER JURISDICTION.",
+      "answer_start": 92816
+    }
+  },
+  {
+    "id": "metlife-remarketing-003",
+    "contract_file": "MetLife, Inc. - Remarketing Agreement",
+    "natural_question": "Does this agreement automatically renew after its term ends?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "not_present",
+    "gold_answer_span": null
+  },
+  {
+    "id": "borrowmoney-jv-001",
+    "contract_file": "BORROWMONEYCOM,INC_06_11_2020-EX-10.1-JOINT VENTURE AGREEMENT",
+    "natural_question": "What state's law governs this joint venture agreement?",
+    "clause_category": "Governing Law",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "By this Agreement the Members enter into a joint venture (the \"Venture\") in accordance with the laws of the State of Florida.",
+      "answer_start": 852
+    }
+  }
+]
