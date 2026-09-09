@@ -12,6 +12,7 @@ langchain_classic package as of LangChain 1.0.
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
+
 def chunk_contract(
     text: str,
     parent_size: int = 2000,
