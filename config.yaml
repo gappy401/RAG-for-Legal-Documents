@@ -1,0 +1,16 @@
+# Central config for chunking, retrieval, and file paths.
+# Change values here -- every script reads from this file instead of
+# hardcoding its own copy of these numbers.
+
+chunking:
+  parent_size: 2000
+  parent_overlap: 200
+  child_size: 600
+  child_overlap: 75   # locked in from the child_size sweep (300/400/600/800/1000)
+
+retrieval:
+  top_k_values: [1, 3, 5]   # which recall@k cutoffs to report
+
+paths:
+  eval_set: "eval/eval_set.json"
+  cuad_json: "data/cuad-repo/unzipped/CUADv1.json"
