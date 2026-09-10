@@ -53,12 +53,10 @@ def evaluate_model(model_name: str, all_chunks: list[dict], title_to_text: dict,
         gold_end = gold_start + len(item["gold_answer_span"]["text"])
 
         found_rank = None
-        rank = 0
-        for idx in indices[0]:
+        for rank, idx in enumerate(indices[0], start=1):
             chunk = all_chunks[idx]
             if chunk["parent_text"] not in title_to_text[item["contract_file"]]:
                 continue
-            rank += 1
             if overlaps(chunk, gold_start, gold_end):
                 found_rank = rank
                 break
