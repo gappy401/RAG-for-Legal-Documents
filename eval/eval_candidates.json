@@ -1,174 +1,1340 @@
-"""
-LLM-assisted eval set expansion, WITH a mandatory human review gate.
-
-Samples new contracts (not already in eval_set.json), picks a mix of
-present/absent clause categories per contract, and asks the Anthropic API
-to draft ONE natural-language question per item -- using your own existing
-hand-written eval items as few-shot style examples, so drafts match the
-phrasing variety you already established (direct + scenario-based, not
-CUAD's formal style).
-
-Output goes to eval/eval_candidates.json -- a SEPARATE file from
-eval_set.json. Nothing here is trusted ground truth until a human reviews
-and moves accepted items into eval_set.json by hand. This script never
-writes to eval_set.json directly.
-"""
-import argparse
-import csv
-import json
-import random
-import sys
-import time
-
-import anthropic
-
-sys.path.insert(0, "src")
-from config import load_config
-
-MODEL = "claude-sonnet-5"
-RANDOM_SEED = 42  # fixed seed so contract sampling is reproducible
-
-
-def load_category_descriptions(path: str) -> dict:
-    """CUAD's category_descriptions.csv has label prefixes baked into every
-    cell ('Category: X', 'Description: Y') plus a BOM character on the first
-    column name -- clean both before using. Keys are lowercased because
-    CUAD's internal category IDs (e.g. 'Termination For Convenience') don't
-    always match the CSV's capitalization (e.g. 'Termination for
-    Convenience') -- a case-sensitive lookup would silently return nothing
-    for several categories."""
-    descriptions = {}
-    with open(path, encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            category_raw = row["Category (incl. context and answer)"]
-            category = category_raw.split("Category:", 1)[-1].strip()
-            description = row["Description"].split("Description:", 1)[-1].strip()
-            descriptions[category.lower()] = description
-    return descriptions
-
-
-def pick_items_for_contract(contract: dict, max_present: int = 3, max_absent: int = 1) -> list[dict]:
-    """Selects a mix of present + absent clause categories for one contract."""
-    para = contract["paragraphs"][0]
-    present = [qa for qa in para["qas"] if not qa["is_impossible"]]
-    absent = [qa for qa in para["qas"] if qa["is_impossible"]]
-
-    random.shuffle(present)
-    random.shuffle(absent)
-
-    selected = []
-    for qa in present[:max_present]:
-        category = qa["id"].split("__")[-1]
-        ans = qa["answers"][0]
-        selected.append({
-            "category": category, "present": True,
-            "text": ans["text"], "answer_start": ans["answer_start"],
-        })
-    for qa in absent[:max_absent]:
-        category = qa["id"].split("__")[-1]
-        selected.append({"category": category, "present": False, "text": None, "answer_start": None})
-
-    return selected
-
-
-def build_prompt(item: dict, category_desc: str, few_shot_examples: list[dict]) -> str:
-    examples_text = "\n".join(
-        f'- Category: {ex["clause_category"]} | Natural question: "{ex["natural_question"]}"'
-        for ex in few_shot_examples
-    )
-
-    if item["present"]:
-        context = (
-            f'The contract contains a "{item["category"]}" clause. '
-            f'Category meaning: {category_desc}\n'
-            f'The actual clause text: "{item["text"][:400]}"'
-        )
-    else:
-        context = (
-            f'The contract does NOT contain a "{item["category"]}" clause. '
-            f'Category meaning: {category_desc}'
-        )
-
-    return f"""You are drafting ONE realistic question a non-lawyer (e.g. a business
-person or paralegal) would type into a contract Q&A search tool -- NOT the
-formal legal phrasing a law dataset would use.
-
-Examples of the phrasing style already used in this project:
-{examples_text}
-
-{context}
-
-Write exactly one natural-language question matching this style. Respond
-with ONLY the question text, nothing else -- no quotes, no preamble."""
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--num-contracts", type=int, default=30)
-    parser.add_argument("--max-present", type=int, default=3)
-    parser.add_argument("--max-absent", type=int, default=1)
-    parser.add_argument("--output", default="eval/eval_candidates.json")
-    args = parser.parse_args()
-
-    config = load_config()
-    with open(config["paths"]["cuad_json"]) as f:
-        cuad = json.load(f)
-    with open(config["paths"]["eval_set"]) as f:
-        existing_eval_set = json.load(f)
-
-    already_used = {item["contract_file"] for item in existing_eval_set}
-    category_descriptions = load_category_descriptions("data/cuad-repo/category_descriptions.csv")
-
-    # use your own hand-written items as few-shot style anchors
-    few_shot_examples = existing_eval_set[:4]
-
-    candidate_contracts = [c for c in cuad["data"] if c["title"] not in already_used]
-    random.seed(RANDOM_SEED)
-    sampled_contracts = random.sample(candidate_contracts, min(args.num_contracts, len(candidate_contracts)))
-
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from environment
-
-    candidates = []
-    for i, contract in enumerate(sampled_contracts, start=1):
-        items = pick_items_for_contract(contract, args.max_present, args.max_absent)
-        print(f"[{i}/{len(sampled_contracts)}] {contract['title'][:60]} -- {len(items)} items")
-
-        for item in items:
-            category_desc = category_descriptions.get(item["category"].lower(), "")
-            prompt = build_prompt(item, category_desc, few_shot_examples)
-
-            response = client.messages.create(
-                model=MODEL,
-                max_tokens=100,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            natural_question = response.content[0].text.strip()
-
-            candidate = {
-                "id": f"candidate-{len(candidates)+1:04d}",
-                "contract_file": contract["title"],
-                "natural_question": natural_question,
-                "clause_category": item["category"],
-                "expected_answer": "present" if item["present"] else "not_present",
-                "gold_answer_span": (
-                    {"text": item["text"], "answer_start": item["answer_start"]}
-                    if item["present"] else None
-                ),
-                "_reviewed": False,  # human review gate -- flip to true only after checking by hand
-            }
-            candidates.append(candidate)
-            print(f"    [{candidate['expected_answer']:<12}] {item['category']:<30} -> {natural_question}")
-
-            time.sleep(0.5)  # gentle rate limiting
-
-    with open(args.output, "w") as f:
-        json.dump(candidates, f, indent=2)
-
-    print(f"\nWrote {len(candidates)} UNREVIEWED candidates to {args.output}")
-    print("Nothing here is trusted ground truth yet -- review each one, fix any wrong")
-    print("phrasing or wrong category matches, THEN manually move accepted items into eval_set.json.")
-
-
-if __name__ == "__main__":
-    main()
+[
+  {
+    "id": "candidate-0001",
+    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "natural_question": "Can either party just walk away from this agreement without a reason, as long as they give proper notice?",
+    "clause_category": "Termination For Convenience",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Notwithstanding the foregoing, either party may terminate this Agreement at any time without liability by providing one hundred eighty (180) days written notice to the other party.",
+      "answer_start": 1633
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0002",
+    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "natural_question": "Is there a maximum dollar amount either party can be on the hook for if they breach this agreement?",
+    "clause_category": "Cap On Liability",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "EXCEPT AS STATED ABOVE, THE PROVIDER'S OBLIGATIONS UNDER THIS AGREEMENT ARE IN LIEU OF ALL OTHER WARRANTIES, EXPRESSED OR IMPLIED. ALL IMPLIED WARRANTIES ARE LIMITED TO THE DURATION OF THIS AGREEMENT. A PARTY'S TOTAL LIABILITY TO THE OTHER PARTY IN CONNECTION WITH THIS AGREEMENT, FOR ANY AND ALL CAUSES OF ACTIONS AND CLAIMS, INCLUDING, WITHOUT LIMITATION, BREACH OF CONTRACT, BREACH OF WARRANTY, NEGLIGENCE, STRICT LIABILITY, MISREPRESENTATION AND OTHER TORTS, SHALL BE:   (a) FOR BODILY INJURY OR DEATH TO ANY PERSON PROXIMATELY CAUSED BY A PARTY'S NEGLIGENCE, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (b) FOR LOSS OR DAMAGE TO REAL PROPERTY OR TANGIBLE PERSONAL PROPERTY PROXIMATELY CAUSED BY A PARTY'S NEGLIGENCE, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (c) FOR ANY DAMAGES ARISING OUT OF THE WILLFUL OR INTENTIONAL MISCONDUCT OF A PARTY, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (d) FOR ALL OTHER DAMAGES OTHER THAN THOSE SET FORTH ABOVE AND NOT EXCLUDED UNDER THIS AGREEMENT, EACH PARTY'S LIABILITY TO THE OTHER PARTY DURING ANY TWELVE (12) MONTH PERIOD SHALL BE LIMITED TO THE LESSOR OF (i) DIRECT DAMAGES PROVEN BY THE PARTY, OR (ii) THE AMOUNT PAID BY THE COMPANY TO THE PROVIDER UNDER THIS AGREEMENT FOR THE TWELVE (12) MONTH PERIOD PRIOR TO THE CLAIM.",
+      "answer_start": 9232
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0003",
+    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement will extend automatically for monthly periods unless either party to this Agreement notifies the other party in writing at least thirty (30) days before the expiration of the then current term.",
+      "answer_start": 1397
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0004",
+    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "natural_question": "Are we allowed to challenge the other party's ownership of their IP or bring unrelated claims against them?",
+    "clause_category": "Covenant Not To Sue",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0005",
+    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Strategic Alliance Agreement",
+      "answer_start": 17042
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0006",
+    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Do we get first dibs on new tech licenses before they're shopped around to other clients?",
+    "clause_category": "Rofr/Rofo/Rofn",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Present technology acquisition opportunities for AVDU. AVDU will have 30-days to determine if they want to go forward with the technology license.\n\n  a. UTK after 30 days shall have the right to present the technology to other clients.",
+      "answer_start": 14924
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0007",
+    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Can UTK transfer its rights under this agreement to another company without getting our approval first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The benefits of the Agreement shall inure to the respective successors and assignees of the parties and assigns and representatives, and the obligations and liabilities assumed in this Agreement by the parties hereto shall be binding upon their respective successors and assigns; provided that the rights and obligations of UTK under this Agreement may not be assigned or delegated without the prior written consent of AVDU and any such purported assignment shall be null and void.",
+      "answer_start": 10239
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0008",
+    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Can we transfer our license under this agreement to another company without approval?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0009",
+    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
+    "natural_question": "When does this agreement officially start?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "July 1, 2019",
+      "answer_start": 59
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0010",
+    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
+    "natural_question": "Can we transfer or assign our membership rights to someone else, or is that not allowed?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Society membership rights and privileges cannot be transferred or assigned.",
+      "answer_start": 4016
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0011",
+    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
+    "natural_question": "What is this document called?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ENDORSEMENT",
+      "answer_start": 30
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0012",
+    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
+    "natural_question": "Can someone who isn't part of this agreement still have the right to enforce any of its terms?",
+    "clause_category": "Third Party Beneficiary",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0013",
+    "contract_file": "GOCALLINC_03_30_2000-EX-10.7-Promotion Agreement",
+    "natural_question": "Are we barred from running this same promotion with other online casinos during the contract term?",
+    "clause_category": "Exclusivity",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "PageMaster Corporation shall not engage in the same or similar                promotion with any other On-Line Casinos from June 1, 1999                through June 1, 2000.",
+      "answer_start": 4867
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0014",
+    "contract_file": "GOCALLINC_03_30_2000-EX-10.7-Promotion Agreement",
+    "natural_question": "What state's laws control how this agreement is interpreted?",
+    "clause_category": "Governing Law",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement will be governed by and construed in accordance with the laws of the State of California, exclusive of conflicts of law principles, and will, to the maximum extent practicable, be deemed to call for performance in Los Angeles County, California.",
+      "answer_start": 12275
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0015",
+    "contract_file": "GOCALLINC_03_30_2000-EX-10.7-Promotion Agreement",
+    "natural_question": "Do we have to supply a minimum number of pagers for this promotion, and what's the cap?",
+    "clause_category": "Minimum Commitment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "PageMaster Corporation shall provide a minimum of 100,000 up to                500,000 pagers for the fulfillment of this promotion to all                Purchase Customers who prepay their annual airtime.",
+      "answer_start": 2793
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0016",
+    "contract_file": "GOCALLINC_03_30_2000-EX-10.7-Promotion Agreement",
+    "natural_question": "If we later give someone else a better price or terms on the same products or services, are we required to offer those same terms to this buyer?",
+    "clause_category": "Most Favored Nation",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0017",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "When does the initial term of this agreement end?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Except as otherwise provided herein, the term of this Agreement is three (3) years from the Execution Date (\"Cooperation Period\").",
+      "answer_start": 5145
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0018",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "Do we need the other party's written approval before we can assign this agreement to someone else?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Neither Party shall assign any rights or obligations provided herein without the prior written consent of the other Party.",
+      "answer_start": 8067
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0019",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "11th day of December, 2015",
+      "answer_start": 161
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0020",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "If we ever wanted to sell part of the business, does the other party get first dibs on buying it?",
+    "clause_category": "Rofr/Rofo/Rofn",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0021",
+    "contract_file": "DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement",
+    "natural_question": "Does NCM grant the Network Affiliate a license to use its trademarks or other IP under this agreement?",
+    "clause_category": "License Grant",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Subject to the terms and conditions of this Agreement and such other standards, trademark usage guidelines and  specifications as are prescribed by NCM during the term of this Agreement (the \"NCM Quality Standards\"), NCM hereby grants to Network  Affiliate, and Network Affiliate hereby accepts, a non-exclusive, non-transferable (except in connection with an assignment of this Agreement in  accordance with Section 14.8 hereof), non-sublicenseable, limited license (i) to use the NCM Marks solely in connection with its receipt and  exhibition of the Service, as approved by NCM in writing in advance, and (ii) to use the NCM Marks in marketing or advertising materials  (\"Marketing Materials\") that have been approved by NCM pursuant to the terms hereof.",
+      "answer_start": 47130
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0022",
+    "contract_file": "DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement",
+    "natural_question": "What type of agreement is this document?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NETWORK AFFILIATE AGREEMENT",
+      "answer_start": 75
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0023",
+    "contract_file": "DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement",
+    "natural_question": "Can we assign this agreement to another company, or do we need the other party's approval first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Any attempted  assignment in violation of this section shall be void.",
+      "answer_start": 101607
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0024",
+    "contract_file": "DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement",
+    "natural_question": "If we find out another customer got a better deal on the same products or services, are we entitled to that same pricing?",
+    "clause_category": "Most Favored Nation",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0025",
+    "contract_file": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement2",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Bank of America, N.A.",
+      "answer_start": 183
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0026",
+    "contract_file": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement2",
+    "natural_question": "What is the title of this document?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Customization Schedule",
+      "answer_start": 41
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0027",
+    "contract_file": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement2",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0028",
+    "contract_file": "ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT",
+    "natural_question": "Do we automatically own any inventions or IP the provider comes up with while working with us?",
+    "clause_category": "Ip Ownership Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Recipient shall own, and Provider hereby irrevocably assigns to the Recipient, all rights, title, and interest in any invention, technique, process, device, discovery, improvement, or know-how, whether patentable or not and all other proprietary rights, industrial rights and any other similar rights, in each case on a worldwide basis, and all copies and tangible embodiments thereof, or any part thereof, in whatever form or medium hereafter made or conceived solely or jointly by Provider while working for or on behalf of the Recipient, which relate to, is suggested by, or results from the Services.",
+      "answer_start": 5161
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0029",
+    "contract_file": "ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT",
+    "natural_question": "When was this agreement signed and dated?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "October 1, 2019",
+      "answer_start": 306
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0030",
+    "contract_file": "ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT",
+    "natural_question": "Can either side just walk away from this contract without a reason, as long as they give 90 days' notice?",
+    "clause_category": "Termination For Convenience",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Each of the Recipient and the Provider may, in their sole discretion, terminate this Agreement in whole or in part, at any time without cause, and without liability except, in the case of the Recipient, for required payment for services rendered and reimbursement for authorized expenses incurred, by providing at least 90 (ninety) days' prior written notice to the other party (such date, the \"Services Termination Date\").",
+      "answer_start": 9867
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0031",
+    "contract_file": "ABILITYINC_06_15_2020-EX-4.25-SERVICES AGREEMENT",
+    "natural_question": "Are either of us barred from bad-mouthing the other publicly?",
+    "clause_category": "Non-Disparagement",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0032",
+    "contract_file": "KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement",
+    "natural_question": "What do we still have to do for the other party after this agreement ends or gets terminated?",
+    "clause_category": "Post-Termination Services",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In the event of Product which Kitov claims have Apparent Defects or Hidden Defects, Dexcel shall have up to thirty (30) Working Days after receipt of the samples to show that the Product in question meets the Specifications (\"Period\").",
+      "answer_start": 21397
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0033",
+    "contract_file": "KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement",
+    "natural_question": "Do we need to keep insurance in place for the other party's benefit throughout this agreement?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "At the time of entering this Agreement, each Party shall be fully insured and shall duly maintain such insurance during the term of this Agreement and thereafter for so long as it customarily maintains insurance for itself for similar products and activities.",
+      "answer_start": 48267
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0034",
+    "contract_file": "KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement",
+    "natural_question": "How long do we have to notify the seller if the product doesn't meet specs?",
+    "clause_category": "Warranty Duration",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Kitov shall provide Dexcel with written notification of any shortfalls in shipment quantity, and (a) any out-of-specification temperature excursions based on the downloaded data logger information following compliance with the provisions of the Quality Agreement, and/or (b) any failure of the Product to meet the Specifications which are apparent upon visual inspection and/or identification testing of the Product delivered to it by Dexcel (each of (a) and (b) being an \"Apparent Defect\"), such notification to be provided within thirty (30) Working Days of receipt of the Product at Kitov's warehouse, accompanied by samples of any such allegedly defective Product and any such Product shall not be removed from quarantine until their status is resolved.",
+      "answer_start": 19800
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0035",
+    "contract_file": "KitovPharmaLtd_20190326_20-F_EX-4.15_11584449_EX-4.15_Manufacturing Agreement",
+    "natural_question": "When was this agreement actually signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0036",
+    "contract_file": "WASTE2ENERGYHOLDINGS,INC_06_03_2010-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Can we pass on or sublicense this license to another company, or is it just for us?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Each Party grants to the other Party a non-exclusive, non-transferable, royalty-free licence to use the other Party's Intellectual Property Rights  as far is strictly necessary to comply with its marketing and promotional obligations under this Agreement.",
+      "answer_start": 16726
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0037",
+    "contract_file": "WASTE2ENERGYHOLDINGS,INC_06_03_2010-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Are we allowed to hire each other's employees while this agreement is active or after it ends?",
+    "clause_category": "No-Solicit Of Employees",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Each Party agrees that during the Term of this Agreement and for a period of six (6) months thereafter it shall not, without the prior written  consent of the other Party, either on its own account or through its employees or agents or otherwise or on behalf of any other person,  firm, company or other organisation and other than by general advertising, solicit, interfere with, procure or entice away (or, in each case,  attempt so to do), either directly or indirectly, any employee or contractor of the other Party.",
+      "answer_start": 15038
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0038",
+    "contract_file": "WASTE2ENERGYHOLDINGS,INC_06_03_2010-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Are we restricted from working directly with contacts that W2E introduced to us without W2E's approval?",
+    "clause_category": "Non-Compete",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "SHBV agrees not to engage in business dealings, discussions, or otherwise work directly with any third parties introduced to SHBV  through W2E, or to exploit any pre-existing relationship of W2E with any third party that has been represented to SHBV by W2E,  without the prior consent and/or direct participation of W2E.",
+      "answer_start": 15922
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0039",
+    "contract_file": "WASTE2ENERGYHOLDINGS,INC_06_03_2010-EX-10.2-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "If we create any IP while working together, does ownership transfer to the other party?",
+    "clause_category": "Ip Ownership Assignment",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0040",
+    "contract_file": "DUOSTECHNOLOGIESGROUP,INC_04_21_2009-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Can we hand off or transfer our license rights to another company?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Rubicon hereby grants to ISA during the Term and subject to the exclusions described in 2.4 below an exclusive, non-transferable  license in the United States to grant licenses to use, display, perform and distribute the Rubicon Offerings and the Documentation to other  resellers, including, but not limited to, distributors, Original Equipment Manufacturers, system integrators and Value-Added Resellers, for further  sale and distribution to End Users for their use as described above, subject to the conditions set forth in this Agreement.",
+      "answer_start": 6537
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0041",
+    "contract_file": "DUOSTECHNOLOGIESGROUP,INC_04_21_2009-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Does Rubicon grant ISA a license to use and distribute its products to other resellers?",
+    "clause_category": "License Grant",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Rubicon hereby grants to ISA during the Term and subject to the exclusions described in 2.4 below an exclusive, non-transferable  license in the United States to grant licenses to use, display, perform and distribute the Rubicon Offerings and the Documentation to other  resellers, including, but not limited to, distributors, Original Equipment Manufacturers, system integrators and Value-Added Resellers, for further  sale and distribution to End Users for their use as described above, subject to the conditions set forth in this Agreement.",
+      "answer_start": 6537
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0042",
+    "contract_file": "DUOSTECHNOLOGIESGROUP,INC_04_21_2009-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Are we locked into using only Rubicon for these products, or can we work with other vendors too?",
+    "clause_category": "Exclusivity",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Rubicon hereby grants to ISA during the Term (as defined below) and subject to the exclusions described in 2.4 below an exclusive, non-transferable license in the United States to market, sell, use, display, perform, sublicense and distribute the Rubicon Offerings, the  Documentation and, subject to Section 2.2, any upgrades thereto, subject to the conditions set forth in this Agreement",
+      "answer_start": 5690
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0043",
+    "contract_file": "DUOSTECHNOLOGIESGROUP,INC_04_21_2009-EX-10.1-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "Are we also getting a license to any IP owned by the licensor's affiliates, or just the licensor itself?",
+    "clause_category": "Affiliate License-Licensor",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0044",
+    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
+    "natural_question": "Are we blocked from soliciting the other party's customers during the deal and for some time after it ends?",
+    "clause_category": "No-Solicit Of Customers",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "During the term of this Agreement and for a period of two (2) years after expiration or termination for any reason of this Agreement, Maimon agrees not to:",
+      "answer_start": 5308
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0045",
+    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Idan Maimon",
+      "answer_start": 106
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0046",
+    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
+    "natural_question": "When does this agreement officially start, and how long is the initial term before it needs renewing?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Subject to the provisions for termination hereinafter provided, the term of this Agreement shall commence on the date hereof (the \"Effective Date\") and shall continue for a minimum period of 12 months (the \"Minimum Period\") and thereafter upon the mutual agreement of the Company and Maimon (the \"Service Term\").",
+      "answer_start": 1214
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0047",
+    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
+    "natural_question": "Does this agreement give either company the right to use the other's technology or IP?",
+    "clause_category": "License Grant",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0048",
+    "contract_file": "GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement",
+    "natural_question": "Can we assign or sublicense our rights under this agreement to another company without getting approval first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Company will not sublicense pass-through or otherwise grant to any third parties the rights granted to Company hereunder without the NFLA prior written consent, including but not limited to the right to use the Licensed Marks.",
+      "answer_start": 4314
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0049",
+    "contract_file": "GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement",
+    "natural_question": "Are we barred from ever trying to register or claim ownership of the NFLA trademarks or logo ourselves?",
+    "clause_category": "Covenant Not To Sue",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Company agrees that it will not file, during the Contract Period or afterward, any application for trademark registration or otherwise obtain or attempt to obtain ownership of any trademark or trade name within the Contract Territory or in any other country of the world which consists of the NFLA Identification or any mark, design or logo intended to obtain any rights to the name of the NFLA or to identify products as being endorsed b the NFLA.",
+      "answer_start": 21470
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0050",
+    "contract_file": "GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ENDORSEMENT AGREEMENT",
+      "answer_start": 15
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0051",
+    "contract_file": "GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement",
+    "natural_question": "Does this agreement say anything about the two of us jointly owning any IP we create together?",
+    "clause_category": "Joint Ip Ownership",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0052",
+    "contract_file": "CUROGROUPHOLDINGSCORP_05_04_2020-EX-10.3-SERVICING AGREEMENT",
+    "natural_question": "Can the Agent, even though it's not a signing party, actually enforce this agreement's terms?",
+    "clause_category": "Third Party Beneficiary",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Notwithstanding anything to the contrary in this Agreement, both the Owner and Servicer agree that the Agent shall be deemed to be a third-party beneficiary of this Agreement and has the authority to enforce the provisions hereof.",
+      "answer_start": 33320
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0053",
+    "contract_file": "CUROGROUPHOLDINGSCORP_05_04_2020-EX-10.3-SERVICING AGREEMENT",
+    "natural_question": "When does the initial term of this agreement actually expire or come to an end?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement shall continue in force until the earlier to occur of (i) the Owner no longer owns any Receivables or Participation Interests, and (ii) subject to Section 7(d), the delivery of written notice of termination by the Owner to the Servicer pursuant to Section 7(c), in each case upon which event this Agreement shall automatically terminate unless otherwise agreed in writing between the Servicer and the Owner.",
+      "answer_start": 9589
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0054",
+    "contract_file": "CUROGROUPHOLDINGSCORP_05_04_2020-EX-10.3-SERVICING AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "SERVICING AGREEMENT",
+      "answer_start": 155
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0055",
+    "contract_file": "CUROGROUPHOLDINGSCORP_05_04_2020-EX-10.3-SERVICING AGREEMENT",
+    "natural_question": "Are we restricted from hiring or soliciting the other party's employees during or after this agreement?",
+    "clause_category": "No-Solicit Of Employees",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0056",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NON-EXCLUSIVE LICENSE AGREEMENT- FOR SALES",
+      "answer_start": 200
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0057",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The Johns Hopkins University",
+      "answer_start": 337
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0058",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "May 3, 2016",
+      "answer_start": 188
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0059",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "How long is the warranty period for defects in the product or service?",
+    "clause_category": "Warranty Duration",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0060",
+    "contract_file": "ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement",
+    "natural_question": "Do we have to share any revenue or profits with the Blockchain Administrator, or is it just a flat fee?",
+    "clause_category": "Revenue/Profit Sharing",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In full consideration of the provision of the services of the Blockchain Administrator set forth herein, the Fund shall pay the Blockchain Administrator a fees calculated at the annual rate of 0.20% of the value of the Fund's average annual net assets.",
+      "answer_start": 7555
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0061",
+    "contract_file": "ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement",
+    "natural_question": "What date in 2020 was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "[___], 2020",
+      "answer_start": 185
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0062",
+    "contract_file": "ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement",
+    "natural_question": "When does the initial two-year term of this agreement expire?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement shall continue in effect for two years from the date hereof, and thereafter shall continue automatically for successive annual periods, provided that such continuance is specifically approved at least annually by (A) the vote of the Board, or by the vote of a majority of the outstanding voting securities of the Fund and (B) the vote of a majority of the Fund's directors who are not parties to this Agreement or \"interested persons\" (as such term is defined in Section 2(a)(19) of the Investment Fund Act) of any such party, in accordance with the requirements of the Investment Fund Act.",
+      "answer_start": 13148
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0063",
+    "contract_file": "ArcaUsTreasuryFund_20200207_N-2_EX-99.K5_11971930_EX-99.K5_Development Agreement",
+    "natural_question": "Are there any exceptions that let us get around the non-compete or exclusivity restrictions in this agreement?",
+    "clause_category": "Competitive Restriction Exception",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0064",
+    "contract_file": "SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",
+    "natural_question": "Can we assign this agreement to another company without getting the other party's approval first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement shall not be assignable by either party without the prior written consent of the other party.",
+      "answer_start": 7605
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0065",
+    "contract_file": "SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",
+    "natural_question": "When does the initial term of this agreement end?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The term of this Agreement is twelve (12) months from the date hereof, and will be automatically renewed for one (1) additional twelve month period unless either party shall notify the other in writing of its intention not to renew.",
+      "answer_start": 5793
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0066",
+    "contract_file": "SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",
+    "natural_question": "Do we owe Bravatek a cut of revenue for clients they refer to us?",
+    "clause_category": "Revenue/Profit Sharing",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "For any Product or Solution sold to any perspective clients introduced by Bravatek registered with COMPANY via email to COMPANY's CEO and delivered through Bravatek or a COMPANY-designated distribution affiliate(s) or sales channel(s), Bravatek will receive a lead-finder fee, to be mutually discussed and finally decided by COMPANY at the range of minimum of 10% to maximum of 20% of project revenue, with an exact fee to be depending upon the overall project sales margin and cost of development and delivery of each project, payable NET 30 days after each client payment on delivered products received at COMPANY's bank account.",
+      "answer_start": 3753
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0067",
+    "contract_file": "SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",
+    "natural_question": "Is there a limit on how much we could owe if we breach this agreement, or a deadline for the other side to file a claim?",
+    "clause_category": "Cap On Liability",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0068",
+    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "May 12, 2020",
+      "answer_start": 124
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0069",
+    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
+    "natural_question": "Does this agreement give one party a license to use the other party's applications or products?",
+    "clause_category": "License Grant",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "THI is granted the following rights to the Applications in Appendix A and the Licensed Products derived therefrom:",
+      "answer_start": 3264
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0070",
+    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
+    "natural_question": "Do our affiliates get covered under the license we're granted, not just us directly?",
+    "clause_category": "Affiliate License-Licensee",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Any such sublicense may be made effective retroactively, but not prior to the effective date hereof, nor prior to the sublicensee's becoming a Related Company.",
+      "answer_start": 5294
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0071",
+    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
+    "natural_question": "How long is the warranty period for defects in the products or services covered by this agreement?",
+    "clause_category": "Warranty Duration",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0072",
+    "contract_file": "Principal Life Insurance Company - Broker Dealer Marketing and Servicing Agreement",
+    "natural_question": "Do we need to keep any insurance in place for the other party's benefit under this agreement?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In those states where Broker Dealer has not obtained an insurance license, Broker Dealer represents and   warrants that: it has entered into an insurance networking agreement with the undersigned duly licensed   insurance affiliate(s) to act on its behalf in the capacity of a licensed insurance agent or agency   (\"Affiliated Agency\").",
+      "answer_start": 14085
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0073",
+    "contract_file": "Principal Life Insurance Company - Broker Dealer Marketing and Servicing Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "(collectively \"Broker Dealer\")",
+      "answer_start": 518
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0074",
+    "contract_file": "Principal Life Insurance Company - Broker Dealer Marketing and Servicing Agreement",
+    "natural_question": "Can the Broker Dealer transfer this agreement to another company without getting sign-off from us first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement may not be assigned by Broker Dealer without the prior written consent of Issuer and   Distributor, which shall not be unreasonably withheld.",
+      "answer_start": 25119
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0075",
+    "contract_file": "Principal Life Insurance Company - Broker Dealer Marketing and Servicing Agreement",
+    "natural_question": "Can someone who isn't a party to this agreement still enforce any rights under it?",
+    "clause_category": "Third Party Beneficiary",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0076",
+    "contract_file": "BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Bellicum Pharmaceuticals, Inc.",
+      "answer_start": 664
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0077",
+    "contract_file": "BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",
+    "natural_question": "Do we need to keep increasing our insurance coverage as things ramp up under this agreement?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In addition, from time to time during the Term, each Party shall increase their levels of insurance coverage if reasonably deemed prudent by such Party in light of the overall products supplied and/or activities performed under this Agreement.",
+      "answer_start": 153058
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0078",
+    "contract_file": "BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",
+    "natural_question": "Can Bellicum pass along or transfer this license to another company, or is that restricted?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The supply of the Miltenyi Products hereunder conveys to Bellicum the limited, non-exclusive, non-transferable (except as expressly provided herein, including as set forth in Article 17) right to use, and to permit its Subcontractors and Licensees to use the Miltenyi Products solely for Ex Vivo Cell Processing in the manufacture of Bellicum Products for use in the Field in the Territory (including for research, pre-clinical, clinical, regulatory and commercial purposes), in accordance with applicable Regulatory Authority requirements and approvals (including (to the extent applicable) any relevant clinical trial protocol, IND, and/or IRB approval pertaining to such Bellicum Products), in each case consistent with the terms and conditions of this Agreement and in accordance with Applicable Laws (the \"Permitted Use\"). Bellicum's Permitted Use of the Miltenyi Products shall be limited to the Designated Countries, subject to Section 2.3.",
+      "answer_start": 22585
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0079",
+    "contract_file": "BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",
+    "natural_question": "Is there a penalty or fee we'd owe if we terminate this contract early?",
+    "clause_category": "Liquidated Damages",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0080",
+    "contract_file": "STWRESOURCESHOLDINGCORP_08_06_2014-EX-10.1-COOPERATION AGREEMENT",
+    "natural_question": "Can someone who isn't a party to this agreement claim any rights under it?",
+    "clause_category": "Third Party Beneficiary",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Nothing in this AGREEMENT shall be construed to confer any right, privilege or benefit on, or to otherwise create any vested right or third-party beneficiary relationship with any person or entity not a party to the AGREEMENT, unless otherwise provided in this AGREEMENT.",
+      "answer_start": 24770
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0081",
+    "contract_file": "STWRESOURCESHOLDINGCORP_08_06_2014-EX-10.1-COOPERATION AGREEMENT",
+    "natural_question": "Do we have to pay the other party a royalty or share of revenue from selling the water?",
+    "clause_category": "Revenue/Profit Sharing",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "STW shall pay COFS a seventeen percent (17%) royalty of the price STW receives per 1,000 gallons of CRA water produced from the Property and sold.",
+      "answer_start": 14049
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0082",
+    "contract_file": "STWRESOURCESHOLDINGCORP_08_06_2014-EX-10.1-COOPERATION AGREEMENT",
+    "natural_question": "When does this agreement actually start\u2014on the date of the last signature?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "effective as of the last date of signature on the signature pages below",
+      "answer_start": 455
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0083",
+    "contract_file": "STWRESOURCESHOLDINGCORP_08_06_2014-EX-10.1-COOPERATION AGREEMENT",
+    "natural_question": "Do we get access to the source code if the vendor goes bankrupt or stops supporting the software?",
+    "clause_category": "Source Code Escrow",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0084",
+    "contract_file": "LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",
+    "natural_question": "Does Sierra get first dibs on buying back Envision's leftover inventory if the agreement ends?",
+    "clause_category": "Rofr/Rofo/Rofn",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Upon  termination,  ENVISION shall have eighteen (18) months to exhaust          any  inventories,  packaging  and  advertising  materials  bearing  the          \"SierraSil\"  trademark  and SIERRA  shall have first option to buy back          any inventory at ENVISION's net purchase price.",
+      "answer_start": 6694
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0085",
+    "contract_file": "LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",
+    "natural_question": "Does this agreement automatically renew each year, and how much notice do we need to give if we want to stop it from renewing?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The  term of this  Agreement  shall  be two (2)  years  from the          Effective  Date with  automatic  annual  renewals  thereafter  provided          either  party does not provide  sixty (60) days  notice of  termination          prior to the renewal date or the Agreement is not otherwise  terminated          as set forth in Section 8.",
+      "answer_start": 3960
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0086",
+    "contract_file": "LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",
+    "natural_question": "Does Envision need to carry liability insurance and add Sierra as an additional insured on those policies?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ENVISION  warrants  that it          carries  general  liability  insurance of $1 million per occurrence and          product liability  insurance of not less than $2 million per occurrence          and that, upon execution of this  Agreement,  it will name SIERRA as an          additional insured on such policies.",
+      "answer_start": 9239
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0087",
+    "contract_file": "LEGACYTECHNOLOGYHOLDINGS,INC_12_09_2005-EX-10.2-DISTRIBUTOR AGREEMENT",
+    "natural_question": "If we later give another customer a better price or terms on the same products, are we required to offer that same deal to this buyer?",
+    "clause_category": "Most Favored Nation",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0088",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Barclays",
+      "answer_start": 160
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0089",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "When does the initial term of this agreement expire?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In addition, the obligations of the Remarketing Agent  hereunder may be terminated by it by notice given to the Company prior to 5:00 p.m. (New York City time) on the date immediately preceding the  Commencement Date if, prior to that time, any of the events described in Sections 6(i), (j) or (k) shall have occurred.",
+      "answer_start": 89709
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0090",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "Do we need to keep insurance coverage in place for the other party's benefit through the Commencement Date and Remarketing Settlement Date?",
+    "clause_category": "Insurance",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "All such  insurance is outstanding and duly in force on the date hereof and will be outstanding and duly in force on the Commencement Date and the  Remarketing Settlement Date.",
+      "answer_start": 44953
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0091",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0092",
+    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
+    "natural_question": "When was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "November 1, 2019",
+      "answer_start": 88
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0093",
+    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
+    "natural_question": "Can we assign this agreement to another company without getting the other party's sign-off first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "A change of control shall be deemed an assignment requiring consent hereunder provided that any transfer or assignment that results in Seller's and Buyer's current common parent, Reynolds Group Holdings Limited, ceasing to control either party shall not require consent of the other party.",
+      "answer_start": 54581
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0094",
+    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
+    "natural_question": "Are there any situations where our liability wouldn't be capped, like for IP infringement or leaking confidential info?",
+    "clause_category": "Uncapped Liability",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Notwithstanding the preceding sentences, this Subsection will not limit the liability of a Party for any amount or type of damages for: (1) the defense and indemnification of an Indemnified Claim on which the Party is the Indemnifying Party; (2) infringement by the Party on the intellectual property of the other Party; (3) the unauthorized disclosure or use by the Party of the Confidential Information of the other Party; (4) payment or reimbursement of any amount expressly required to be paid or reimbursed by the Party under a provision of this Agreement; or (5) the intentional misconduct of the Party in violation of Applicable Laws.",
+      "answer_start": 27007
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0095",
+    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
+    "natural_question": "If we wanted to sell any of our tech or assets, does the other party get first dibs on buying them?",
+    "clause_category": "Rofr/Rofo/Rofn",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0096",
+    "contract_file": "HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT",
+    "natural_question": "Which state's laws apply if there's a dispute over this contract?",
+    "clause_category": "Governing Law",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement has been made in the State of California and shall be governed by and construed in accordance with the laws thereof without regard to principles of conflicts of laws.",
+      "answer_start": 10347
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0097",
+    "contract_file": "HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT",
+    "natural_question": "Can the Company end this agreement early just by giving written notice, without needing a specific reason?",
+    "clause_category": "Termination For Convenience",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In the event that the Company desires to terminate the Agreement prior to the Termination Date, it shall provide AGI with at least 60 days prior written notice of its intention to terminate this Agreement and this Agreement shall so terminate following the expiration of this 60-day period, without any further responsibility by either Party except as provided in Section 5.",
+      "answer_start": 5116
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0098",
+    "contract_file": "HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "20th day of March 2002",
+      "answer_start": 115
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0099",
+    "contract_file": "HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT",
+    "natural_question": "If we want to sell or license our tech to someone else, does the other party get first dibs on it?",
+    "clause_category": "Rofr/Rofo/Rofn",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0100",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "Are we required to work exclusively with this agent in Nevada instead of using other subagents?",
+    "clause_category": "Exclusivity",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "In order to allow SC&W to expand the distribution system in Nevada with      select and controlled subagents, an exclusive agency agreement will be      negotiated which will spell out the terms and conditions of the      relationship.",
+      "answer_start": 22342
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0101",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement shall terminate, subject to any automatic                   renewal or extension for one year as required by law, upon                   either party giving at least one hundred twenty (120) days                   advance written notice to the other, if not otherwise contrary                   to applicable law or this Agreement.",
+      "answer_start": 9520
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0102",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "When does this agreement officially take effect?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Signed and effective this 25th day of May, 1999.",
+      "answer_start": 18226
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0103",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "Can we pass along or transfer our license to another company, or is that restricted?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0104",
+    "contract_file": "HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+    "natural_question": "How long does the licensee need to keep transaction records after the agreement ends?",
+    "clause_category": "Post-Termination Services",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "All books of account and records of Licensee covering all transactions relating to the Licensee shall be retained by the Licensee until at least two (2) years after the expiration or termination of the Term for possible inspection by Smith.",
+      "answer_start": 10915
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0105",
+    "contract_file": "HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+      "answer_start": 37
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0106",
+    "contract_file": "HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+    "natural_question": "Can TDA assign this agreement to another company without getting Smith's written approval first?",
+    "clause_category": "Anti-Assignment",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Except with Smith's prior written approval, this Agreement may not be assigned by TDA: (i) in connection with a merger, a sale of all or substantially all of the assets of TDA or other similar corporate reorganization, or the sale of substantially all of TDA's rights to all of its Golf Instruction Related Products; or (ii) to",
+      "answer_start": 22281
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0107",
+    "contract_file": "HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+    "natural_question": "Can we pass along our license rights to another company, or does that need approval first?",
+    "clause_category": "Non-Transferable License",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0108",
+    "contract_file": "HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement",
+    "natural_question": "Is there a limit on how much NCC can be held liable for if something goes wrong?",
+    "clause_category": "Cap On Liability",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NCC shall in no circumstances be liable to the Owner or the Licensee             for indirect or consequential loss of any nature whatsoever whether             for loss of profit, loss of business or otherwise.",
+      "answer_start": 24402
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0109",
+    "contract_file": "HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement",
+    "natural_question": "What type of agreement is this document?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ESCROW AGREEMENT",
+      "answer_start": 10615
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0110",
+    "contract_file": "HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement",
+    "natural_question": "Do we get access to the source code if the vendor goes bankrupt or shuts down?",
+    "clause_category": "Source Code Escrow",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The Material shall be supplied with details of the following:\n\n      1     Details of the deposit: full name and version details, number of             media items, media type and density, file or archive format, list or             retrieval commands, archive hardware and operating system details.\n\n      2     Name and functionality of each module/application of the Material.\n\n      3     Names and versions of development tools etc.\n\n      4     Documentation describing the procedures for building / compiling /             executing / using the software (technical notes, user guides).\n\n      5     Hardcopy directory listings of the contents of the media.\n\n      6     Name and contact details of employee(s) with knowledge of how to             maintain and support the Material.",
+      "answer_start": 30361
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0111",
+    "contract_file": "HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement",
+    "natural_question": "Are we restricted from competing with the other party or operating in a specific market after signing this?",
+    "clause_category": "Non-Compete",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0112",
+    "contract_file": "BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT",
+    "natural_question": "What happens if we need more than the 500,000 impressions NAI is providing\u2014do we have to pay extra or get their approval?",
+    "clause_category": "Volume Restriction",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NAI will make available up to 500,000 impressions on the NAI Internet Sites      and ten percent (10%) of the impressions available on NAI's Upgrade/Update      site for advertising materials to promote Beyond.com.",
+      "answer_start": 36413
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0113",
+    "contract_file": "BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT",
+    "natural_question": "When does this agreement officially start?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The Effective Date of this Agreement (herein called the \"Effective Date\") is September 21, 1998.",
+      "answer_start": 577
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0114",
+    "contract_file": "BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT",
+    "natural_question": "Do we still have any obligations to keep records or provide services after this agreement ends?",
+    "clause_category": "Post-Termination Services",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "For three (3) years after each calendar quarter during the           term of this Agreement, Co-Host will keep, at Co-Host's office, full           and accurate books of account and copies of all documents and other           materials for such quarter relating to this Agreement and Co-Host's           records, accounts and contracts relating to the distribution of the           Products.",
+      "answer_start": 42760
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0115",
+    "contract_file": "BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT",
+    "natural_question": "If the company gets acquired or merges with another business, does the other party get to end the contract or do we need their sign-off first?",
+    "clause_category": "Change Of Control",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0116",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "When was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "June 29, 2006",
+      "answer_start": 177
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0117",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "When does this agreement officially take effect?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "June 29, 2006",
+      "answer_start": 177
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0118",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "What is the title of this agreement?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "COMPLEHON AGREEMENT AND UQITDITV MAINTENANCE AGREEMENT",
+      "answer_start": 65
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0119",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "Is the license we're granting here permanent, or could it be revoked down the line?",
+    "clause_category": "Irrevocable Or Perpetual License",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  }
+]
