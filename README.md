@@ -182,7 +182,55 @@ not universal — it should be validated against your own corpus size and eval
 set, not assumed. A small corpus needs a smaller `k` to avoid washing out
 strong single-method signals.
 
+### Full-corpus realism test (all 510 CUAD contracts, ~68k chunks)
+
+The experiments above were run against only the 4 contracts the eval set
+references (~500 chunks) — an easier retrieval problem than a real system
+faces. Reindexed against the full CUAD corpus (68,476 chunks, a 139x larger
+haystack) to check whether earlier conclusions hold at realistic scale.
+
+| Method | R@1 | R@3 | R@5 |
+|---|---|---|---|
+| BM25 only | **0%** | 43% | 57% |
+| Vector (BGE) only | **0%** | 43% | 57% |
+| Hybrid (RRF, k=5) | **29%** | **71%** | **71%** |
+
+**Both individual methods collapse to 0% at R@1 once competing against a
+realistic-size corpus** — `limeenergy-002` alone goes from BM25 rank 50 (at
+small scale) to rank 11,301 (at full scale), since many more chunks now share
+incidental common words. Hybrid retrieval's advantage over either individual
+method is *larger*, not smaller, at this scale — the strongest evidence yet
+for why hybrid retrieval matters, beyond the smaller gap seen at toy scale.
+
+**RRF k re-swept at full-corpus scale** (bug fix note: an earlier version of
+the rank-counting logic only counted competing chunks from the same document,
+which would have silently hidden this entire realism problem — fixed to count
+every chunk in the corpus toward rank, matching the original BM25 baseline's
+correct logic):
+
+| RRF k | R@1 | R@3 | R@5 |
+|---|---|---|---|
+| 1 | 14% | 57% | 71% |
+| **5** | **29%** | **71%** | **71%** |
+| 10 | 29% | 57% | 71% |
+| 20 | 43% | 43% | 57% |
+| 40 | 43% | 43% | 57% |
+| 60 | 43% | 43% | 43% |
+
+No single k dominates every cutoff here — k=20/40 edge out k=5 on R@1 (43% vs.
+29%) but fall well behind on R@3/R@5. **Kept k=5**, reasoned from what the next
+pipeline stage needs: cross-encoder reranking (next phase) fixes *ordering*
+among already-retrieved candidates, so what matters most going into that stage
+is recall at a wider cutoff (getting the right answer *somewhere* in the top
+~10), not raw R@1 — which reranking is specifically meant to improve *for* you.
+
+**Known hard limit:** `limeenergy-002`'s hybrid rank is 1,957 regardless of k
+tested — a genuine retrieval miss no reranking window (even top-50) can
+recover, since reranking only re-sorts candidates already retrieved. Expected
+to remain a real failure case through the reranking phase; documented here
+rather than assumed away.
+
 ## Status
 
-🚧 Early stage — retrieval baselines and hybrid fusion (RRF, k=5) complete.
-Next: cross-encoder reranking.
+🚧 Early stage — retrieval baselines, hybrid fusion (RRF, k=5), and full-corpus
+(68k chunk) realism validation complete. Next: cross-encoder reranking.

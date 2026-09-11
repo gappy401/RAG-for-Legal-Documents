@@ -24,8 +24,12 @@ from chunking import chunk_contract
 from config import load_config
 from bm25_base import tokenize, build_index as build_bm25_index
 from embeddings import load_embedding_model, embed_texts
+from sentence_transformers import CrossEncoder
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # chosen from vector_baseline.py results
+RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # standard, well-tested cross-encoder
+RERANK_TOP_N = 20  # only rerank hybrid's top 20 -- cross-encoders can't be precomputed,
+                   # so reranking all 68k chunks per query would be far too slow
 FULL_CORPUS_CACHE = Path("data/full_corpus_cache.pkl")
 
 
@@ -42,6 +46,23 @@ def rrf_fuse(bm25_ranked_indices: list[int], vector_ranked_indices: list[int], k
     for rank, idx in enumerate(vector_ranked_indices, start=1):
         scores[idx] = scores.get(idx, 0.0) + 1.0 / (k + rank)
     return sorted(scores.keys(), key=lambda idx: scores[idx], reverse=True)
+
+
+def rerank_top_n(reranker: CrossEncoder, query: str, ranked_indices: list[int],
+                  all_chunks: list[dict], top_n: int) -> list[int]:
+    """
+    Takes hybrid's top_n candidates and re-scores each with a cross-encoder
+    that reads (query, chunk_text) jointly. Returns a new ranking for just
+    those top_n indices, re-sorted by cross-encoder score. Anything beyond
+    top_n is left out entirely -- reranking can't rescue a candidate that
+    didn't make the initial shortlist.
+    """
+    shortlist = ranked_indices[:top_n]
+    pairs = [(query, all_chunks[idx]["child_text"]) for idx in shortlist]
+    scores = reranker.predict(pairs)
+    # pair each shortlisted index with its cross-encoder score, sort descending
+    reranked = [idx for idx, _ in sorted(zip(shortlist, scores), key=lambda x: x[1], reverse=True)]
+    return reranked
 
 
 def find_rank(ranked_indices, all_chunks, title_to_text, contract_file, gold_start, gold_end):
@@ -134,6 +155,8 @@ def main():
                          help="Index all 510 CUAD contracts instead of just the 4 in eval_set.json")
     parser.add_argument("--sweep-k", action="store_true",
                          help="Also run an RRF k-sweep after the main comparison")
+    parser.add_argument("--rerank", action="store_true",
+                         help="Add cross-encoder reranking on top of hybrid's top candidates")
     args = parser.parse_args()
 
     config = load_config()
@@ -163,6 +186,7 @@ def main():
     bm25 = index_data["bm25"]
     vector_index = index_data["vector_index"]
     model = load_embedding_model(EMBEDDING_MODEL)
+    reranker = CrossEncoder(RERANKER_MODEL) if args.rerank else None
 
     present_items = [item for item in eval_set if item["expected_answer"] == "present"]
     n = len(present_items)
@@ -170,6 +194,7 @@ def main():
     bm25_hits = {k: 0 for k in top_k_values}
     vector_hits = {k: 0 for k in top_k_values}
     hybrid_hits = {k: 0 for k in top_k_values}
+    rerank_hits = {k: 0 for k in top_k_values}
     bm25_ranked_by_item = {}
     vector_ranked_by_item = {}
 
@@ -193,8 +218,16 @@ def main():
         vector_rank = find_rank(vector_ranked, all_chunks, title_to_text, item["contract_file"], gold_start, gold_end)
         hybrid_rank = find_rank(fused_ranked, all_chunks, title_to_text, item["contract_file"], gold_start, gold_end)
 
-        print(f"{item['id']:<25} BM25: {bm25_rank or 'miss':<6} "
-              f"Vector: {vector_rank or 'miss':<6} Hybrid: {hybrid_rank or 'miss'}")
+        rerank_rank = None
+        if args.rerank:
+            reranked = rerank_top_n(reranker, item["natural_question"], fused_ranked, all_chunks, RERANK_TOP_N)
+            rerank_rank = find_rank(reranked, all_chunks, title_to_text, item["contract_file"], gold_start, gold_end)
+
+        line = (f"{item['id']:<25} BM25: {bm25_rank or 'miss':<6} "
+                f"Vector: {vector_rank or 'miss':<6} Hybrid: {hybrid_rank or 'miss':<6}")
+        if args.rerank:
+            line += f" Reranked: {rerank_rank or 'miss'}"
+        print(line)
 
         for k in top_k_values:
             if bm25_rank is not None and bm25_rank <= k:
@@ -203,10 +236,15 @@ def main():
                 vector_hits[k] += 1
             if hybrid_rank is not None and hybrid_rank <= k:
                 hybrid_hits[k] += 1
+            if rerank_rank is not None and rerank_rank <= k:
+                rerank_hits[k] += 1
 
     print(f"\n{'='*60}\nSUMMARY ({len(all_chunks)} chunks)\n{'='*60}")
     print(f"{'Method':<12}" + "".join(f"R@{k:<10}" for k in top_k_values))
-    for label, hits in [("BM25", bm25_hits), ("Vector", vector_hits), ("Hybrid", hybrid_hits)]:
+    summary_rows = [("BM25", bm25_hits), ("Vector", vector_hits), ("Hybrid", hybrid_hits)]
+    if args.rerank:
+        summary_rows.append(("Reranked", rerank_hits))
+    for label, hits in summary_rows:
         row = f"{label:<12}"
         for k in top_k_values:
             row += f"{hits[k]}/{n} ({hits[k]/n:.0%}) "
