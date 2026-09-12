@@ -1,0 +1,356 @@
+[
+  {
+    "id": "candidate-0003",
+    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement will extend automatically for monthly periods unless either party to this Agreement notifies the other party in writing at least thirty (30) days before the expiration of the then current term.",
+      "answer_start": 1397
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0005",
+    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Strategic Alliance Agreement",
+      "answer_start": 17042
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0009",
+    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
+    "natural_question": "When does this agreement officially start?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "July 1, 2019",
+      "answer_start": 59
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0017",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "When does the initial term of this agreement end?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Except as otherwise provided herein, the term of this Agreement is three (3) years from the Execution Date (\"Cooperation Period\").",
+      "answer_start": 5145
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0019",
+    "contract_file": "CHIPMOSTECHNOLOGIESBERMUDALTD_04_18_2016-EX-4.72-Strategic Alliance Agreement",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "11th day of December, 2015",
+      "answer_start": 161
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0022",
+    "contract_file": "DigitalCinemaDestinationsCorp_20111220_S-1_EX-10.10_7346719_EX-10.10_Affiliate Agreement",
+    "natural_question": "What type of agreement is this document?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NETWORK AFFILIATE AGREEMENT",
+      "answer_start": 75
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0025",
+    "contract_file": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement2",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Bank of America, N.A.",
+      "answer_start": 183
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0027",
+    "contract_file": "CardlyticsInc_20180112_S-1_EX-10.16_11002987_EX-10.16_Maintenance Agreement2",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0045",
+    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Idan Maimon",
+      "answer_start": 106
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0050",
+    "contract_file": "GridironBionutrientsInc_20171206_8-K_EX-10.1_10972555_EX-10.1_Endorsement Agreement",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ENDORSEMENT AGREEMENT",
+      "answer_start": 15
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0054",
+    "contract_file": "CUROGROUPHOLDINGSCORP_05_04_2020-EX-10.3-SERVICING AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "SERVICING AGREEMENT",
+      "answer_start": 155
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0056",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "NON-EXCLUSIVE LICENSE AGREEMENT- FOR SALES",
+      "answer_start": 200
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0057",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The Johns Hopkins University",
+      "answer_start": 337
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0058",
+    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "May 3, 2016",
+      "answer_start": 188
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0065",
+    "contract_file": "SIBANNAC,INC_12_04_2017-EX-2.1-Strategic Alliance Agreement",
+    "natural_question": "When does the initial term of this agreement end?",
+    "clause_category": "Expiration Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The term of this Agreement is twelve (12) months from the date hereof, and will be automatically renewed for one (1) additional twelve month period unless either party shall notify the other in writing of its intention not to renew.",
+      "answer_start": 5793
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0068",
+    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "May 12, 2020",
+      "answer_start": 124
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0073",
+    "contract_file": "Principal Life Insurance Company - Broker Dealer Marketing and Servicing Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "(collectively \"Broker Dealer\")",
+      "answer_start": 518
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0076",
+    "contract_file": "BELLICUMPHARMACEUTICALS,INC_05_07_2019-EX-10.1-Supply Agreement",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Bellicum Pharmaceuticals, Inc.",
+      "answer_start": 664
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0088",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "Who are the parties entering into this agreement?",
+    "clause_category": "Parties",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Barclays",
+      "answer_start": 160
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0091",
+    "contract_file": "Reinsurance Group of America, Incorporated - A_R REMARKETING  AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "not_present",
+    "gold_answer_span": null,
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0092",
+    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
+    "natural_question": "When was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "November 1, 2019",
+      "answer_start": 88
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0098",
+    "contract_file": "HOLIDAYRVSUPERSTORESINC_04_15_2002-EX-10.13-ENDORSEMENT AGREEMENT",
+    "natural_question": "What date was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "20th day of March 2002",
+      "answer_start": 115
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0101",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
+    "clause_category": "Renewal Term",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "This Agreement shall terminate, subject to any automatic                   renewal or extension for one year as required by law, upon                   either party giving at least one hundred twenty (120) days                   advance written notice to the other, if not otherwise contrary                   to applicable law or this Agreement.",
+      "answer_start": 9520
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0102",
+    "contract_file": "AMERICANPHYSICIANSCAPITALINC_03_31_2003-EX-10.26-AGENCY AGREEMENT",
+    "natural_question": "When does this agreement officially take effect?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "Signed and effective this 25th day of May, 1999.",
+      "answer_start": 18226
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0105",
+    "contract_file": "HALITRON,INC_03_01_2005-EX-10.15-SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+    "natural_question": "What kind of agreement is this?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "SPONSORSHIP AND DEVELOPMENT AGREEMENT",
+      "answer_start": 37
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0109",
+    "contract_file": "HEALTHGATEDATACORP_11_24_1999-EX-10.1-HOSTING AND MANAGEMENT AGREEMENT - Escrow Agreement",
+    "natural_question": "What type of agreement is this document?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "ESCROW AGREEMENT",
+      "answer_start": 10615
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0113",
+    "contract_file": "BEYONDCOMCORP_08_03_2000-EX-10.2-CO-HOSTING AGREEMENT",
+    "natural_question": "When does this agreement officially start?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "The Effective Date of this Agreement (herein called the \"Effective Date\") is September 21, 1998.",
+      "answer_start": 577
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0116",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "When was this agreement signed?",
+    "clause_category": "Agreement Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "June 29, 2006",
+      "answer_start": 177
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0117",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "When does this agreement officially take effect?",
+    "clause_category": "Effective Date",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "June 29, 2006",
+      "answer_start": 177
+    },
+    "_reviewed": false
+  },
+  {
+    "id": "candidate-0118",
+    "contract_file": "PRIMEENERGYRESOURCESCORP_04_02_2007-EX-10.28-COMPLETION AND LIQUIDITY MAINTENANCE AGREEMENT",
+    "natural_question": "What is the title of this agreement?",
+    "clause_category": "Document Name",
+    "expected_answer": "present",
+    "gold_answer_span": {
+      "text": "COMPLEHON AGREEMENT AND UQITDITV MAINTENANCE AGREEMENT",
+      "answer_start": 65
+    },
+    "_reviewed": false
+  }
+]

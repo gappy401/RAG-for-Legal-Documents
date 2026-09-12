@@ -13,7 +13,9 @@ dependencies = [
     "sentence-transformers (>=6.0.1,<7.0.0)",
     "faiss-cpu (>=1.15.0,<2.0.0)",
     "rank-bm25 (>=0.2.2,<0.3.0)",
-    "anthropic (>=1.5.0,<2.0.0)"
+    "anthropic (>=1.5.0,<2.0.0)",
+    "pyspellchecker (>=0.9.0,<0.10.0)",
+    "spellchecker (>=0.4,<0.5)"
 ]
 
 

@@ -72,7 +72,7 @@ def pick_items_for_contract(contract: dict, max_present: int = 3, max_absent: in
     return selected
 
 
-def build_prompt(item: dict, category_desc: str, few_shot_examples: list[dict]) -> str:
+def build_prompt(item: dict, category_desc: str, few_shot_examples: list[dict], avoid_phrasings: list[str] = None) -> str:
     examples_text = "\n".join(
         f'- Category: {ex["clause_category"]} | Natural question: "{ex["natural_question"]}"'
         for ex in few_shot_examples
@@ -90,6 +90,17 @@ def build_prompt(item: dict, category_desc: str, few_shot_examples: list[dict]) 
             f'Category meaning: {category_desc}'
         )
 
+    avoid_block = ""
+    if avoid_phrasings:
+        avoid_list = "\n".join(f'- "{p}"' for p in avoid_phrasings)
+        avoid_block = (
+            f"\n\nIMPORTANT: these exact phrasings have ALREADY been used for this "
+            f"category elsewhere in the eval set -- do NOT repeat any of them or "
+            f"produce something structurally identical. Write a genuinely different "
+            f"angle (e.g. a scenario, an indirect question, a different sentence "
+            f"structure) instead of a synonym-swap of the same question:\n{avoid_list}"
+        )
+
     return f"""You are drafting ONE realistic question a non-lawyer (e.g. a business
 person or paralegal) would type into a contract Q&A search tool -- NOT the
 formal legal phrasing a law dataset would use.
@@ -97,7 +108,7 @@ formal legal phrasing a law dataset would use.
 Examples of the phrasing style already used in this project:
 {examples_text}
 
-{context}
+{context}{avoid_block}
 
 Write exactly one natural-language question matching this style. Respond
 with ONLY the question text, nothing else -- no quotes, no preamble."""
