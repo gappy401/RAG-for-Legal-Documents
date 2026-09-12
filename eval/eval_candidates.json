@@ -1,140 +1,5 @@
 [
   {
-    "id": "candidate-0001",
-    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
-    "natural_question": "Can either of us walk away from this agreement just by giving notice, even without a specific reason?",
-    "clause_category": "Termination For Convenience",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "Notwithstanding the foregoing, either party may terminate this Agreement at any time without liability by providing one hundred eighty (180) days written notice to the other party.",
-      "answer_start": 1633
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0002",
-    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
-    "natural_question": "Is there a maximum dollar amount either party could owe if they breach this agreement?",
-    "clause_category": "Cap On Liability",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "EXCEPT AS STATED ABOVE, THE PROVIDER'S OBLIGATIONS UNDER THIS AGREEMENT ARE IN LIEU OF ALL OTHER WARRANTIES, EXPRESSED OR IMPLIED. ALL IMPLIED WARRANTIES ARE LIMITED TO THE DURATION OF THIS AGREEMENT. A PARTY'S TOTAL LIABILITY TO THE OTHER PARTY IN CONNECTION WITH THIS AGREEMENT, FOR ANY AND ALL CAUSES OF ACTIONS AND CLAIMS, INCLUDING, WITHOUT LIMITATION, BREACH OF CONTRACT, BREACH OF WARRANTY, NEGLIGENCE, STRICT LIABILITY, MISREPRESENTATION AND OTHER TORTS, SHALL BE:   (a) FOR BODILY INJURY OR DEATH TO ANY PERSON PROXIMATELY CAUSED BY A PARTY'S NEGLIGENCE, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (b) FOR LOSS OR DAMAGE TO REAL PROPERTY OR TANGIBLE PERSONAL PROPERTY PROXIMATELY CAUSED BY A PARTY'S NEGLIGENCE, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (c) FOR ANY DAMAGES ARISING OUT OF THE WILLFUL OR INTENTIONAL MISCONDUCT OF A PARTY, THE AMOUNT OF DIRECT DAMAGES PROVEN;   (d) FOR ALL OTHER DAMAGES OTHER THAN THOSE SET FORTH ABOVE AND NOT EXCLUDED UNDER THIS AGREEMENT, EACH PARTY'S LIABILITY TO THE OTHER PARTY DURING ANY TWELVE (12) MONTH PERIOD SHALL BE LIMITED TO THE LESSOR OF (i) DIRECT DAMAGES PROVEN BY THE PARTY, OR (ii) THE AMOUNT PAID BY THE COMPANY TO THE PROVIDER UNDER THIS AGREEMENT FOR THE TWELVE (12) MONTH PERIOD PRIOR TO THE CLAIM.",
-      "answer_start": 9232
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0003",
-    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
-    "natural_question": "Does this agreement automatically renew, and if so, for how long each time?",
-    "clause_category": "Renewal Term",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "This Agreement will extend automatically for monthly periods unless either party to this Agreement notifies the other party in writing at least thirty (30) days before the expiration of the then current term.",
-      "answer_start": 1397
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0004",
-    "contract_file": "UAGHINC_04_14_2004-EX-10.18-MAINTENANCE AGREEMENT",
-    "natural_question": "Are we prohibited from challenging the other party's IP ownership or suing them over unrelated matters?",
-    "clause_category": "Covenant Not To Sue",
-    "expected_answer": "not_present",
-    "gold_answer_span": null,
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0005",
-    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
-    "natural_question": "What is the title of this contract?",
-    "clause_category": "Document Name",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "Strategic Alliance Agreement",
-      "answer_start": 17042
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0006",
-    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
-    "natural_question": "Do we get first dibs on new technology licenses before UTK shops them to other clients?",
-    "clause_category": "Rofr/Rofo/Rofn",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "Present technology acquisition opportunities for AVDU. AVDU will have 30-days to determine if they want to go forward with the technology license.\n\n  a. UTK after 30 days shall have the right to present the technology to other clients.",
-      "answer_start": 14924
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0007",
-    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
-    "natural_question": "Can UTK transfer its rights or duties under this agreement to someone else without getting our approval first?",
-    "clause_category": "Anti-Assignment",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "The benefits of the Agreement shall inure to the respective successors and assignees of the parties and assigns and representatives, and the obligations and liabilities assumed in this Agreement by the parties hereto shall be binding upon their respective successors and assigns; provided that the rights and obligations of UTK under this Agreement may not be assigned or delegated without the prior written consent of AVDU and any such purported assignment shall be null and void.",
-      "answer_start": 10239
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0008",
-    "contract_file": "ORBSATCORP_08_17_2007-EX-7.3-STRATEGIC ALLIANCE AGREEMENT",
-    "natural_question": "Can we pass along or transfer our license to another company without asking permission first?",
-    "clause_category": "Non-Transferable License",
-    "expected_answer": "not_present",
-    "gold_answer_span": null,
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0009",
-    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
-    "natural_question": "When does this agreement officially take effect?",
-    "clause_category": "Effective Date",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "July 1, 2019",
-      "answer_start": 59
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0010",
-    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
-    "natural_question": "Can we transfer our membership rights to someone else, or do we need approval first?",
-    "clause_category": "Anti-Assignment",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "Society membership rights and privileges cannot be transferred or assigned.",
-      "answer_start": 4016
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0011",
-    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
-    "natural_question": "What is this document called?",
-    "clause_category": "Document Name",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "ENDORSEMENT",
-      "answer_start": 30
-    },
-    "_reviewed": false
-  },
-  {
-    "id": "candidate-0012",
-    "contract_file": "ThriventVariableInsuranceAccountB_20190701_N-6_EX-99.D(IV)_11720968_EX-99.D(IV)_Endorsement Agreement",
-    "natural_question": "Can someone who isn't a party to this agreement still enforce any rights under it?",
-    "clause_category": "Third Party Beneficiary",
-    "expected_answer": "not_present",
-    "gold_answer_span": null,
-    "_reviewed": false
-  },
-  {
     "id": "candidate-0013",
     "contract_file": "GOCALLINC_03_30_2000-EX-10.7-Promotion Agreement",
     "natural_question": "Are we barred from running the same kind of promotion with other online casinos during the contract term?",
@@ -495,18 +360,6 @@
     "_reviewed": false
   },
   {
-    "id": "candidate-0045",
-    "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
-    "natural_question": "Which individual is named as a party to this services agreement?",
-    "clause_category": "Parties",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "Idan Maimon",
-      "answer_start": 106
-    },
-    "_reviewed": true
-  },
-  {
     "id": "candidate-0046",
     "contract_file": "SCOUTCAMINC_05_12_2020-EX-10.22-SERVICES AGREEMENT",
     "natural_question": "When does this agreement officially start and how long is the initial term before it needs mutual renewal?",
@@ -641,18 +494,6 @@
     },
     "_reviewed": false
   },
-{
-    "id": "candidate-0058",
-    "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
-    "natural_question": "On what date did the parties actually put pen to paper on this license agreement?",
-    "clause_category": "Agreement Date",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "May 3, 2016",
-      "answer_start": 188
-    },
-    "_reviewed": true
-  },
   {
     "id": "candidate-0059",
     "contract_file": "VirtuosoSurgicalInc_20191227_1-A_EX1A-6 MAT CTRCT_11933379_EX1A-6 MAT CTRCT_License Agreement",
@@ -751,18 +592,6 @@
     "expected_answer": "not_present",
     "gold_answer_span": null,
     "_reviewed": false
-  },
-  {
-    "id": "candidate-0068",
-    "contract_file": "PREMIERBIOMEDICALINC_05_14_2020-EX-10.2-INTELLECTUAL PROPERTY AGREEMENT",
-    "natural_question": "What's the date written at the top of this agreement where it was signed?",
-    "clause_category": "Agreement Date",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "May 12, 2020",
-      "answer_start": 124
-    },
-    "_reviewed": true
   },
   {
     "id": "candidate-0069",
@@ -1021,18 +850,6 @@
     "expected_answer": "not_present",
     "gold_answer_span": null,
     "_reviewed": false
-  },
-  {
-    "id": "candidate-0092",
-    "contract_file": "ReynoldsConsumerProductsInc_20191115_S-1_EX-10.18_11896469_EX-10.18_Supply Agreement",
-    "natural_question": "What signing date is stated on this supply agreement?",
-    "clause_category": "Agreement Date",
-    "expected_answer": "present",
-    "gold_answer_span": {
-      "text": "November 1, 2019",
-      "answer_start": 88
-    },
-    "_reviewed": true
   },
   {
     "id": "candidate-0093",
